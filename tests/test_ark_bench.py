@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "ark_bench.py"
@@ -26,6 +27,34 @@ class ModelResolutionTests(unittest.TestCase):
         )
         self.assertGreater(exact, other)
         self.assertGreater(exact, 0.8)
+
+    def test_discovery_reuses_profiles_from_auth_status(self):
+        calls = []
+
+        def fake_run_json(argv):
+            calls.append(argv)
+            self.assertNotEqual(argv[1:3], ["profile", "list"])
+            return {
+                "items": [
+                    {
+                        "id": "doubao-seed-2-0-mini-260215",
+                    }
+                ]
+            }
+
+        auth_status = {
+            "profiles_summary": [
+                {
+                    "name": "agent-plan_cn-beijing_personal",
+                    "type": "agent-plan",
+                }
+            ]
+        }
+        with patch.object(ark_bench, "run_json", side_effect=fake_run_json):
+            candidates = ark_bench.discover_candidates(auth_status)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(candidates[0]["profile"], "agent-plan_cn-beijing_personal")
 
 
 class MetricTests(unittest.TestCase):

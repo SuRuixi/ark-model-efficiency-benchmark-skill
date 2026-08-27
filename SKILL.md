@@ -18,29 +18,78 @@ Invoke for requests such as:
 - 「测一下某个 Ark Endpoint 的 TTFT、TPOT」
 - 「比较 Ark 上两个模型的延迟」
 
-## Preconditions
+## Fast Invocation
 
-1. Confirm `arkcli` exists with `command -v arkcli`.
-2. Run `arkcli auth status --format json`.
-3. If `logged_in` is false, run `arkcli auth login volc-sso` and wait for the
-   user to finish browser authentication. Do not request or display an API key.
+When this Skill is triggered, run the benchmark wrapper immediately:
+
+```bash
+bash <skill-dir>/scripts/run.sh --model "<user model wording>" --preset standard
+```
+
+Do not perform separate model searches, profile listing, API-key lookup, or
+connectivity probes before this command. The wrapper performs these operations
+once and reuses their results. Redundant Ark CLI discovery adds several seconds
+to startup.
+
+If the wrapper reports that Ark CLI is missing, install it:
+
+```bash
+npm install -g @volcengine/ark-cli@latest
+```
+
+If the wrapper reports that authentication is required, run:
+
+```bash
+arkcli auth login volc-sso
+```
+
+Wait for browser authentication to finish, then rerun the original wrapper
+command. Never request an API key from the user.
+
+## Ark CLI Call Sequence
+
+The runner uses the following fixed sequence. These commands are documented here
+for auditability; the Agent should call the wrapper instead of repeating them.
+
+1. Read authentication state and the available Profile summaries:
+
+```bash
+arkcli auth status --format json
+```
+
+2. Query callable text resources for each Profile concurrently:
+
+```bash
+arkcli resources list \
+  --profile "<profile-name>" \
+  --modality text \
+  --format json
+```
+
+3. Resolve the user's wording against returned resource IDs. Exact model IDs and
+   `ep-...` Endpoint IDs take precedence; aliases and partial names use ranked
+   matching. When `--profile` is supplied, query only that Profile.
+
+4. After selecting a Profile, fetch its API base URL and credential concurrently:
+
+```bash
+arkcli profile show "<profile-name>" --format json
+arkcli profile apikey get --profile "<profile-name>" --plain
+```
+
+Capture the second command directly in process memory. Do not print its stdout.
+Use it only as the `Authorization` header for benchmark requests.
 
 ## Model Resolution
 
-Pass the user's model wording directly to the runner. It searches the text
-resources available to every Ark CLI profile and resolves aliases and partial
-names. Exact model IDs and `ep-...` endpoint IDs are accepted.
+Pass the user's model wording directly to `--model`. The runner searches the
+callable text resources returned by Ark CLI and resolves aliases and partial
+names.
 
 If resolution is ambiguous, the command exits with code 2 and prints ranked
 candidates. Ask the user to choose one candidate, then rerun with that exact ID.
 
 ## Run
-
-Resolve this skill's directory and execute:
-
-```bash
-bash <skill-dir>/scripts/run.sh --model "<user model wording>" --preset standard
-```
 
 Defaults:
 

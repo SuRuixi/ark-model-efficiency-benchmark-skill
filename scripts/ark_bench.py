@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -83,12 +84,13 @@ def run_json(argv: list[str]) -> dict[str, Any]:
         raise BenchmarkError(f"Invalid JSON from {' '.join(argv[:3])}") from exc
 
 
-def check_auth() -> None:
+def check_auth() -> dict[str, Any]:
     status = run_json(["arkcli", "auth", "status", "--format", "json"])
     if not status.get("logged_in"):
         raise BenchmarkError(
             "Ark CLI is not authenticated. Run `arkcli auth login volc-sso` first."
         )
+    return status
 
 
 def normalize_model_name(value: str) -> str:
@@ -120,33 +122,47 @@ def candidate_score(query: str, candidate: str) -> float:
     return difflib.SequenceMatcher(None, q, c).ratio()
 
 
-def discover_candidates(profile_filter: str | None = None) -> list[dict[str, str]]:
-    profile_data = run_json(["arkcli", "profile", "list", "--format", "json"])
-    profiles = profile_data.get("profiles", [])
+def discover_candidates(
+    auth_status: dict[str, Any], profile_filter: str | None = None
+) -> list[dict[str, str]]:
+    profiles = auth_status.get("profiles_summary", [])
+    if not profiles:
+        profiles = run_json(
+            ["arkcli", "profile", "list", "--format", "json"]
+        ).get("profiles", [])
     if profile_filter:
         profiles = [item for item in profiles if item.get("name") == profile_filter]
         if not profiles:
             raise BenchmarkError(f"Ark CLI profile not found: {profile_filter}")
 
+    def fetch_resources(profile: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        resources = run_json(
+            [
+                "arkcli",
+                "resources",
+                "list",
+                "--profile",
+                profile["name"],
+                "--modality",
+                "text",
+                "--format",
+                "json",
+            ]
+        )
+        return profile, resources
+
     candidates: list[dict[str, str]] = []
-    for profile in profiles:
+    with ThreadPoolExecutor(max_workers=max(1, len(profiles))) as executor:
+        futures = [executor.submit(fetch_resources, profile) for profile in profiles]
+        results = []
+        for future in futures:
+            try:
+                results.append(future.result())
+            except BenchmarkError:
+                continue
+
+    for profile, resources in results:
         name = profile["name"]
-        try:
-            resources = run_json(
-                [
-                    "arkcli",
-                    "resources",
-                    "list",
-                    "--profile",
-                    name,
-                    "--modality",
-                    "text",
-                    "--format",
-                    "json",
-                ]
-            )
-        except BenchmarkError:
-            continue
         for item in resources.get("items", []):
             resource_id = item.get("id")
             if not resource_id or resource_id == "auto":
@@ -161,8 +177,12 @@ def discover_candidates(profile_filter: str | None = None) -> list[dict[str, str
     return candidates
 
 
-def resolve_target(query: str, profile_filter: str | None = None) -> Target:
-    candidates = discover_candidates(profile_filter)
+def resolve_target(
+    query: str,
+    auth_status: dict[str, Any],
+    profile_filter: str | None = None,
+) -> Target:
+    candidates = discover_candidates(auth_status, profile_filter)
     if not candidates:
         raise BenchmarkError(
             "No callable text resources were found in the selected Ark CLI profile(s)."
@@ -200,14 +220,11 @@ def resolve_target(query: str, profile_filter: str | None = None) -> Target:
         print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
         raise SystemExit(2)
 
-    profile = run_json(
-        ["arkcli", "profile", "show", best["profile"], "--format", "json"]
-    )
     return Target(
         model=best["id"],
         profile=best["profile"],
         profile_type=best["profile_type"],
-        base_url=profile.get("base_url") or DEFAULT_BASE_URL,
+        base_url="",
     )
 
 
@@ -233,6 +250,18 @@ def get_api_key(profile: str) -> str:
             "Refresh authentication with `arkcli auth login volc-sso`."
         )
     return key
+
+
+def load_profile_access(profile: str) -> tuple[str, str]:
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        profile_future = executor.submit(
+            run_json,
+            ["arkcli", "profile", "show", profile, "--format", "json"],
+        )
+        key_future = executor.submit(get_api_key, profile)
+        profile_data = profile_future.result()
+        api_key = key_future.result()
+    return profile_data.get("base_url") or DEFAULT_BASE_URL, api_key
 
 
 def token_text(encoding: Any, token_count: int, salt: str) -> str:
@@ -899,9 +928,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def async_main(args: argparse.Namespace) -> dict[str, Any]:
     random.seed(args.seed)
-    check_auth()
-    target = resolve_target(args.model, args.profile)
-    api_key = get_api_key(target.profile)
+    auth_status = check_auth()
+    target = resolve_target(args.model, auth_status, args.profile)
+    target.base_url, api_key = load_profile_access(target.profile)
     encoding = tiktoken.get_encoding("cl100k_base")
     output_root = Path(args.output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
