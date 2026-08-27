@@ -5,9 +5,9 @@ description: "Benchmarks Ark LLM latency, throughput, and cache performance with
 
 # Ark Model Benchmark
 
-Run a standardized performance evaluation for an Ark text model or endpoint. The
-runner obtains credentials from the authenticated Ark CLI profile and never asks
-the user to paste an API key.
+Run a standardized performance evaluation through Ark's postpaid API and preset
+inference endpoints. The runner uses a `platform` Ark CLI profile, obtains its
+credential automatically, and never asks the user to paste an API key.
 
 ## Trigger
 
@@ -57,20 +57,24 @@ for auditability; the Agent should call the wrapper instead of repeating them.
 arkcli auth status --format json
 ```
 
-2. Query callable text resources for each Profile concurrently:
+2. Select the default Profile whose `type` is `platform`. Ignore
+   `agent-plan`, `coding-plan`, and other subscription Profiles.
+
+3. For a natural-language model name, search the Ark text-model catalog:
 
 ```bash
-arkcli resources list \
+arkcli models search "<normalized-model-name>" \
   --profile "<profile-name>" \
   --modality text \
+  --size 30 \
   --format json
 ```
 
-3. Resolve the user's wording against returned resource IDs. Exact model IDs and
-   `ep-...` Endpoint IDs take precedence; aliases and partial names use ranked
-   matching. When `--profile` is supplied, query only that Profile.
+Resolve the user's wording against `name`, `display_name`, and
+`primary_version`, then construct the callable Model ID. A complete Model ID or
+`ep-...` Endpoint ID bypasses catalog search.
 
-4. After selecting a Profile, fetch its API base URL and credential concurrently:
+4. Fetch the platform API base URL and credential concurrently:
 
 ```bash
 arkcli profile show "<profile-name>" --format json
@@ -80,11 +84,16 @@ arkcli profile apikey get --profile "<profile-name>" --plain
 Capture the second command directly in process memory. Do not print its stdout.
 Use it only as the `Authorization` header for benchmark requests.
 
+5. Call `<base_url>/responses` with the resolved Model ID. Ark automatically
+   routes a Model ID to its preset inference endpoint and charges by consumed
+   tokens through the postpaid platform account. Do not call `arkcli +deploy`,
+   do not create a custom Endpoint, and do not use an Agent Plan credential.
+
 ## Model Resolution
 
-Pass the user's model wording directly to `--model`. The runner searches the
-callable text resources returned by Ark CLI and resolves aliases and partial
-names.
+Pass the user's model wording directly to `--model`. The runner resolves aliases
+and partial names from the Ark model catalog. Normal requests use the resolved
+Model ID and Ark's preset inference endpoint.
 
 If resolution is ambiguous, the command exits with code 2 and prints ranked
 candidates. Ask the user to choose one candidate, then rerun with that exact ID.
@@ -114,7 +123,8 @@ bash <skill-dir>/scripts/run.sh --model "<model>" --scenario multiturn --preset 
 Supported overrides include `--prefix-len`, `--suffix-len`, `--num-prefixes`,
 `--num-requests`, `--initial-len`, `--question-len`, `--num-sessions`,
 `--max-turns`, `--max-concurrency`, `--max-output-tokens`,
-`--reasoning-effort`, and `--profile`.
+`--reasoning-effort`, and `--profile`. An explicitly supplied Profile must have
+`type=platform`.
 
 ## Standard Parameters
 
@@ -126,8 +136,8 @@ Supported overrides include `--prefix-len`, `--suffix-len`, `--num-prefixes`,
 
 These settings can incur substantial model usage. The user explicitly requesting
 a performance test is sufficient authorization to run it. State the selected
-model, profile, scenario, and request count before starting; do not ask for an
-additional confirmation.
+Model ID, postpaid platform Profile, scenario, and request count before starting;
+do not ask for an additional confirmation.
 
 ## Results
 

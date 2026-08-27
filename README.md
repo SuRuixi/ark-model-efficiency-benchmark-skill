@@ -1,6 +1,6 @@
 # Ark Model Efficiency Benchmark Skill
 
-基于 Ark CLI 凭据体系的一键大语言模型性能评测 Skill。用户只需用自然语言指定 Ark 模型或 Endpoint，即可执行标准化压测并获得 Markdown、JSON、CSV 与 PNG 报告，全程无需手写 API Key。
+基于 Ark CLI 凭据体系的一键大语言模型性能评测 Skill。用户只需用自然语言指定 Ark 模型或 Endpoint，即可通过后付费 API 的预置推理接入点执行标准化压测，并获得 Markdown、JSON、CSV 与 PNG 报告，全程无需手写 API Key。
 
 [English](#english)
 
@@ -9,8 +9,9 @@
 ### 核心能力
 
 - 自动检查 Ark CLI 登录状态。
-- 从所有可用 Ark CLI Profile 中解析模型名称、模型 ID 或 `ep-...` Endpoint。
-- 通过 Ark CLI 的机器接口读取当前 Profile 凭据，密钥仅用于请求头，不写入报告或日志。
+- 自动选择 Ark CLI 的 `platform` 后付费 Profile。
+- 将模型名称解析为 Model ID，直接调用 Ark 预置推理接入点；无需创建自定义 Endpoint。
+- 通过 Ark CLI 的机器接口读取平台凭据，密钥仅用于请求头，不写入报告或日志。
 - 执行连通性、Prefix 前缀复用、多轮长上下文三类测试。
 - 统计 TTFT、TPOT、E2E、缓存命中率，以及 Mean、P50、P99。
 - 输出请求级 CSV、结构化 JSON、Markdown 摘要和 PNG 趋势图。
@@ -61,7 +62,7 @@ git clone https://github.com/SuRuixi/ark-model-efficiency-benchmark-skill.git \
 比较 Ark 上两个模型的延迟
 ```
 
-Skill 会自动解析模型、选择可调用的 Profile、运行评测并汇总报告。模型名称存在歧义时，会返回候选列表供用户选择。
+Skill 会自动解析模型、选择后付费 `platform` Profile、运行评测并汇总报告。模型名称存在歧义时，会返回候选列表供用户选择。Agent Plan 与 Coding Plan 不参与评测调用。
 
 ### 命令行使用
 
@@ -90,9 +91,11 @@ bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario multiturn --preset
 ```bash
 bash scripts/run.sh \
   --model "doubao-seed-evolving" \
-  --profile "agent-plan_cn-beijing_personal" \
+  --profile "<platform-profile-name>" \
   --preset quick
 ```
+
+显式指定的 Profile 必须为 `type=platform`。自然语言模型名会通过 Ark 模型目录解析为 Model ID，并由平台自动路由至预置推理接入点。
 
 首次运行会在 Skill 目录创建隔离的 `.venv`，并自动安装 `aiohttp`、`tiktoken` 与 `matplotlib`。
 
@@ -180,13 +183,14 @@ reports/
 
 ### Overview
 
-Ark Model Efficiency Benchmark is a one-command LLM performance evaluation Skill built on Ark CLI authentication. A user can specify an Ark model or endpoint in natural language and receive Markdown, JSON, CSV, and PNG reports without manually entering an API key.
+Ark Model Efficiency Benchmark is a one-command LLM performance evaluation Skill built on Ark CLI authentication. It invokes Ark preset inference endpoints through the postpaid platform API. A user can specify an Ark model or endpoint in natural language and receive Markdown, JSON, CSV, and PNG reports without manually entering an API key.
 
 ### Features
 
 - Verifies Ark CLI authentication.
-- Resolves model aliases, model IDs, and `ep-...` endpoints across available Ark CLI profiles.
-- Retrieves the selected profile credential through Ark CLI without persisting it.
+- Selects an Ark CLI `platform` profile and excludes Agent Plan and Coding Plan profiles.
+- Resolves model aliases to Model IDs and invokes Ark preset inference endpoints without creating a custom endpoint.
+- Retrieves the platform credential through Ark CLI without persisting it.
 - Runs connectivity, prefix-reuse, and multi-turn long-context workloads.
 - Measures TTFT, TPOT, E2E latency, cache hit rate, Mean, P50, and P99.
 - Produces request-level CSV, structured JSON, Markdown summaries, and PNG charts.
@@ -227,7 +231,7 @@ Example:
 Benchmark the performance of Doubao Seed 2.0 Mini on Ark.
 ```
 
-The Skill resolves the resource and profile, runs the benchmark, and summarizes the generated reports. Ambiguous model names produce a ranked candidate list.
+The Skill resolves the model to a postpaid Model ID, selects a `platform` profile, runs the benchmark, and summarizes the generated reports. Ambiguous model names produce a ranked candidate list.
 
 ### CLI Usage
 

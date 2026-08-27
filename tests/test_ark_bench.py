@@ -28,20 +28,25 @@ class ModelResolutionTests(unittest.TestCase):
         self.assertGreater(exact, other)
         self.assertGreater(exact, 0.8)
 
-    def test_discovery_reuses_profiles_from_auth_status(self):
-        calls = []
+    def test_selects_platform_profile_instead_of_agent_plan(self):
+        auth_status = {
+            "profiles_summary": [
+                {
+                    "name": "agent-plan_cn-beijing_personal",
+                    "type": "agent-plan",
+                    "is_default": False,
+                },
+                {
+                    "name": "platform_cn-beijing_accountwide",
+                    "type": "platform",
+                    "is_default": True,
+                }
+            ]
+        }
+        profile = ark_bench.select_platform_profile(auth_status)
+        self.assertEqual(profile["name"], "platform_cn-beijing_accountwide")
 
-        def fake_run_json(argv):
-            calls.append(argv)
-            self.assertNotEqual(argv[1:3], ["profile", "list"])
-            return {
-                "items": [
-                    {
-                        "id": "doubao-seed-2-0-mini-260215",
-                    }
-                ]
-            }
-
+    def test_rejects_explicit_agent_plan_profile(self):
         auth_status = {
             "profiles_summary": [
                 {
@@ -50,11 +55,62 @@ class ModelResolutionTests(unittest.TestCase):
                 }
             ]
         }
-        with patch.object(ark_bench, "run_json", side_effect=fake_run_json):
-            candidates = ark_bench.discover_candidates(auth_status)
+        with self.assertRaisesRegex(
+            ark_bench.BenchmarkError, "postpaid benchmarking requires"
+        ):
+            ark_bench.select_platform_profile(
+                auth_status, "agent-plan_cn-beijing_personal"
+            )
 
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(candidates[0]["profile"], "agent-plan_cn-beijing_personal")
+    def test_resolves_catalog_model_to_postpaid_model_id(self):
+        auth_status = {
+            "profiles_summary": [
+                {
+                    "name": "platform_cn-beijing_accountwide",
+                    "type": "platform",
+                    "is_default": True,
+                }
+            ]
+        }
+        catalog = {
+            "items": [
+                {
+                    "name": "doubao-seed-2-0-mini",
+                    "display_name": "Doubao-Seed-2.0-mini",
+                    "primary_version": "260428",
+                },
+                {
+                    "name": "doubao-seed-2-0-lite",
+                    "display_name": "Doubao-Seed-2.0-lite",
+                    "primary_version": "260428",
+                },
+            ]
+        }
+        with patch.object(ark_bench, "run_json", return_value=catalog) as mocked:
+            target = ark_bench.resolve_target(
+                "豆包 Seed 2.0 Mini", auth_status
+            )
+
+        self.assertEqual(target.model, "doubao-seed-2-0-mini-260428")
+        self.assertEqual(target.profile_type, "platform")
+        self.assertIn("models", mocked.call_args.args[0])
+
+    def test_explicit_model_id_uses_platform_without_catalog_lookup(self):
+        auth_status = {
+            "profiles_summary": [
+                {
+                    "name": "platform_cn-beijing_accountwide",
+                    "type": "platform",
+                }
+            ]
+        }
+        with patch.object(ark_bench, "run_json") as mocked:
+            target = ark_bench.resolve_target(
+                "doubao-seed-2-0-mini-260428", auth_status
+            )
+        mocked.assert_not_called()
+        self.assertEqual(target.model, "doubao-seed-2-0-mini-260428")
+        self.assertEqual(target.profile_type, "platform")
 
 
 class MetricTests(unittest.TestCase):

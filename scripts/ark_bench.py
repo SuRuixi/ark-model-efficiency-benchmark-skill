@@ -112,6 +112,25 @@ def normalize_model_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value)
 
 
+def model_search_query(value: str) -> str:
+    replacements = {
+        "豆包": "doubao",
+        "深度求索": "deepseek",
+        "迷你": "mini",
+        "轻量": "lite",
+        "专业": "pro",
+        "极速": "flash",
+        "正式版": "ga",
+        "模型": "",
+        "端点": "",
+        "接入点": "",
+    }
+    value = value.lower()
+    for source, target in replacements.items():
+        value = value.replace(source, target)
+    return re.sub(r"[^a-z0-9]+", "-", value).strip("-")
+
+
 def candidate_score(query: str, candidate: str) -> float:
     q = normalize_model_name(query)
     c = normalize_model_name(candidate)
@@ -122,58 +141,95 @@ def candidate_score(query: str, candidate: str) -> float:
     return difflib.SequenceMatcher(None, q, c).ratio()
 
 
-def discover_candidates(
-    auth_status: dict[str, Any], profile_filter: str | None = None
-) -> list[dict[str, str]]:
+def available_profiles(auth_status: dict[str, Any]) -> list[dict[str, Any]]:
     profiles = auth_status.get("profiles_summary", [])
     if not profiles:
         profiles = run_json(
             ["arkcli", "profile", "list", "--format", "json"]
         ).get("profiles", [])
+    return profiles
+
+
+def select_platform_profile(
+    auth_status: dict[str, Any], profile_filter: str | None = None
+) -> dict[str, Any]:
+    profiles = available_profiles(auth_status)
     if profile_filter:
         profiles = [item for item in profiles if item.get("name") == profile_filter]
         if not profiles:
             raise BenchmarkError(f"Ark CLI profile not found: {profile_filter}")
-
-    def fetch_resources(profile: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-        resources = run_json(
-            [
-                "arkcli",
-                "resources",
-                "list",
-                "--profile",
-                profile["name"],
-                "--modality",
-                "text",
-                "--format",
-                "json",
-            ]
-        )
-        return profile, resources
-
-    candidates: list[dict[str, str]] = []
-    with ThreadPoolExecutor(max_workers=max(1, len(profiles))) as executor:
-        futures = [executor.submit(fetch_resources, profile) for profile in profiles]
-        results = []
-        for future in futures:
-            try:
-                results.append(future.result())
-            except BenchmarkError:
-                continue
-
-    for profile, resources in results:
-        name = profile["name"]
-        for item in resources.get("items", []):
-            resource_id = item.get("id")
-            if not resource_id or resource_id == "auto":
-                continue
-            candidates.append(
-                {
-                    "id": resource_id,
-                    "profile": name,
-                    "profile_type": profile.get("type", "unknown"),
-                }
+        if profiles[0].get("type") != "platform":
+            raise BenchmarkError(
+                f"Profile {profile_filter} is type={profiles[0].get('type')}; "
+                "postpaid benchmarking requires a platform profile."
             )
+        return profiles[0]
+
+    platform_profiles = [
+        profile for profile in profiles if profile.get("type") == "platform"
+    ]
+    if not platform_profiles:
+        raise BenchmarkError(
+            "No Ark CLI platform profile is available for postpaid API access."
+        )
+    return next(
+        (
+            profile
+            for profile in platform_profiles
+            if profile.get("is_default")
+        ),
+        platform_profiles[0],
+    )
+
+
+def callable_model_id(item: dict[str, Any]) -> str:
+    if item.get("callable_model_id"):
+        return item["callable_model_id"]
+    name = item.get("name", "")
+    version = item.get("primary_version")
+    if version and version != "latest-version":
+        return f"{name}-{version}"
+    return name
+
+
+def discover_model_candidates(query: str, profile: str) -> list[dict[str, str]]:
+    search_query = model_search_query(query)
+    if not search_query:
+        raise BenchmarkError(f"Could not derive a model search term from {query!r}.")
+    response = run_json(
+        [
+            "arkcli",
+            "models",
+            "search",
+            search_query,
+            "--profile",
+            profile,
+            "--modality",
+            "text",
+            "--size",
+            "30",
+            "--format",
+            "json",
+        ]
+    )
+    candidates: list[dict[str, str]] = []
+    for item in response.get("items", []):
+        model_id = callable_model_id(item)
+        if not model_id:
+            continue
+        aliases = [
+            model_id,
+            item.get("name", ""),
+            item.get("display_name", ""),
+        ]
+        candidates.append(
+            {
+                "id": model_id,
+                "name": item.get("name", ""),
+                "display_name": item.get("display_name", ""),
+                "score": max(candidate_score(query, alias) for alias in aliases),
+            }
+        )
     return candidates
 
 
@@ -182,17 +238,35 @@ def resolve_target(
     auth_status: dict[str, Any],
     profile_filter: str | None = None,
 ) -> Target:
-    candidates = discover_candidates(auth_status, profile_filter)
+    profile = select_platform_profile(auth_status, profile_filter)
+    query = query.strip()
+    if re.fullmatch(r"ep-[a-z0-9-]+", query, flags=re.IGNORECASE):
+        return Target(
+            model=query,
+            profile=profile["name"],
+            profile_type="platform",
+            base_url="",
+        )
+    if re.fullmatch(
+        r"[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+-\d{6}",
+        query,
+        flags=re.IGNORECASE,
+    ):
+        return Target(
+            model=query,
+            profile=profile["name"],
+            profile_type="platform",
+            base_url="",
+        )
+
+    candidates = discover_model_candidates(query, profile["name"])
     if not candidates:
         raise BenchmarkError(
-            "No callable text resources were found in the selected Ark CLI profile(s)."
+            f"No callable text model matched {query!r} in the Ark model catalog."
         )
 
     ranked = sorted(
-        (
-            {**candidate, "score": candidate_score(query, candidate["id"])}
-            for candidate in candidates
-        ),
+        candidates,
         key=lambda item: item["score"],
         reverse=True,
     )
@@ -211,7 +285,7 @@ def resolve_target(
             "candidates": [
                 {
                     "model": item["id"],
-                    "profile": item["profile"],
+                    "name": item["display_name"] or item["name"],
                     "score": round(item["score"], 3),
                 }
                 for item in ranked[:5]
@@ -222,8 +296,8 @@ def resolve_target(
 
     return Target(
         model=best["id"],
-        profile=best["profile"],
-        profile_type=best["profile_type"],
+        profile=profile["name"],
+        profile_type="platform",
         base_url="",
     )
 
