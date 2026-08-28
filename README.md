@@ -166,7 +166,7 @@ reports/
 
 ### 安全机制
 
-- 凭据通过 `arkcli profile apikey get --plain` 在运行时读取。
+- 凭据优先通过 `arkcli profile apikey get --plain` 读取；旧版本不支持该参数时，自动回退到 `--format json` 并解析 `api_key` 字段。
 - API Key 不通过命令参数传入，不写入报告、日志或 JSON。
 - HTTP 错误写入报告前会执行密钥脱敏。
 - 请勿在调试时启用包含环境变量的 Shell 跟踪。
@@ -279,7 +279,7 @@ Cross-model comparisons require the same machine, network, token lengths, concur
 
 ### Security
 
-- Credentials are retrieved at runtime through `arkcli profile apikey get --plain`.
+- Credentials are retrieved through `arkcli profile apikey get --plain`, with `--format json` as a compatibility fallback for older CLI versions.
 - API keys are never passed as command-line arguments or stored in generated artifacts.
 - HTTP errors are redacted before they are recorded.
 

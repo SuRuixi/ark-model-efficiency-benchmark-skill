@@ -82,8 +82,16 @@ arkcli profile show "<profile-name>" --format json
 arkcli profile apikey get --profile "<profile-name>" --plain
 ```
 
-Capture the second command directly in process memory. Do not print its stdout.
-Use it only as the `Authorization` header for benchmark requests.
+Ark CLI `1.0.22` supports `--plain`. For versions where that flag is unavailable,
+the runner automatically retries with:
+
+```bash
+arkcli profile apikey get --profile "<profile-name>" --format json
+```
+
+It then reads the top-level `api_key` field. Capture either output directly in
+process memory. Do not print it. Use it only as the `Authorization` header for
+benchmark requests.
 
 5. Export the resolved values only to the child-process environment:
 
@@ -178,7 +186,8 @@ machine, network, parameters, and time window.
 ## Security
 
 - Retrieve credentials only through
-  `arkcli profile apikey get --profile <name> --plain`.
+  `arkcli profile apikey get --profile <name> --plain`, with
+  `--format json` as the compatibility fallback.
 - Never print, persist, summarize, or send API keys to another process except as
   the HTTP `Authorization` header.
 - Generated artifacts must not contain credentials.

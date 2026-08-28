@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -125,6 +126,34 @@ class ModelResolutionTests(unittest.TestCase):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_api_key_plain_output(self):
+        result = SimpleNamespace(returncode=0, stdout="test-key\n", stderr="")
+        with patch.object(ark_bench.subprocess, "run", return_value=result) as mocked:
+            key = ark_bench.get_api_key("platform-profile")
+        self.assertEqual(key, "test-key")
+        self.assertIn("--plain", mocked.call_args.args[0])
+
+    def test_api_key_falls_back_to_json_when_plain_is_unsupported(self):
+        unsupported = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="unknown flag: --plain",
+        )
+        json_result = SimpleNamespace(
+            returncode=0,
+            stdout='{"api_key":"test-key","profile":"platform-profile"}',
+            stderr="",
+        )
+        with patch.object(
+            ark_bench.subprocess,
+            "run",
+            side_effect=[unsupported, json_result],
+        ) as mocked:
+            key = ark_bench.get_api_key("platform-profile")
+        self.assertEqual(key, "test-key")
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(mocked.call_args.args[0][-2:], ["--format", "json"])
+
     def test_standard_preset_matches_bundled_llm_bench(self):
         args = ark_bench.build_parser().parse_args(["--model", "example"])
         ark_bench.apply_preset(args)

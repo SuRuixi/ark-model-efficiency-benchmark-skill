@@ -234,28 +234,49 @@ def resolve_target(
     return Target(best["id"], profile["name"], "platform")
 
 
+def parse_api_key(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+    if not value.startswith("{"):
+        return value
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return payload.get("api_key") or (payload.get("data") or {}).get("api_key") or ""
+
+
 def get_api_key(profile: str) -> str:
-    proc = subprocess.run(
-        [
-            "arkcli",
-            "profile",
-            "apikey",
-            "get",
-            "--profile",
-            profile,
-            "--plain",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    key = proc.stdout.strip()
-    if proc.returncode or not key:
-        raise BenchmarkError(
-            f"Ark CLI could not provide a key for profile {profile}. "
-            "Refresh authentication with `arkcli auth login volc-sso`."
+    base_command = [
+        "arkcli",
+        "profile",
+        "apikey",
+        "get",
+        "--profile",
+        profile,
+    ]
+    errors: list[str] = []
+    for output_flag in (["--plain"], ["--format", "json"]):
+        proc = subprocess.run(
+            base_command + output_flag,
+            text=True,
+            capture_output=True,
+            check=False,
         )
-    return key
+        key = parse_api_key(proc.stdout)
+        if proc.returncode == 0 and key:
+            return key
+        if proc.stderr.strip():
+            errors.append(proc.stderr.strip())
+    detail = errors[-1] if errors else "empty credential response"
+    detail = re.sub(r"ark-[A-Za-z0-9-]+", "<redacted>", detail)
+    raise BenchmarkError(
+        f"Ark CLI could not provide a key for profile {profile}: {detail}. "
+        "Refresh authentication with `arkcli auth login volc-sso`."
+    )
 
 
 def load_profile_access(profile: str) -> tuple[str, str]:
