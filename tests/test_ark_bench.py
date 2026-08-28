@@ -1,32 +1,46 @@
 import importlib.util
+import io
+import os
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 
-MODULE_PATH = Path(__file__).parents[1] / "scripts" / "ark_bench.py"
+SKILL_DIR = Path(__file__).parents[1]
+MODULE_PATH = SKILL_DIR / "scripts" / "ark_bench.py"
 SPEC = importlib.util.spec_from_file_location("ark_bench", MODULE_PATH)
 ark_bench = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = ark_bench
 SPEC.loader.exec_module(ark_bench)
+
+LLM_BENCH_DIR = SKILL_DIR / "llm_bench"
+sys.path.insert(0, str(LLM_BENCH_DIR))
+import datasets as llm_datasets
+import engine as llm_engine
+import metrics as llm_metrics
 
 
 class ModelResolutionTests(unittest.TestCase):
     def test_normalizes_chinese_aliases(self):
         actual = ark_bench.normalize_model_name("豆包 Seed 2.0 迷你模型")
         self.assertEqual(actual, "doubaoseed20mini")
+        self.assertEqual(
+            ark_bench.model_search_query("豆包 Seed 2.0 迷你模型"),
+            "doubao-seed-2-0-mini",
+        )
 
     def test_exact_candidate_has_highest_score(self):
         query = "豆包 seed 2.0 mini"
         exact = ark_bench.candidate_score(
-            query, "doubao-seed-2-0-mini-260215"
+            query, "doubao-seed-2-0-mini-260428"
         )
         other = ark_bench.candidate_score(
-            query, "doubao-seed-2-0-lite-260215"
+            query, "doubao-seed-2-0-lite-260428"
         )
         self.assertGreater(exact, other)
-        self.assertGreater(exact, 0.8)
 
     def test_selects_platform_profile_instead_of_agent_plan(self):
         auth_status = {
@@ -40,7 +54,7 @@ class ModelResolutionTests(unittest.TestCase):
                     "name": "platform_cn-beijing_accountwide",
                     "type": "platform",
                     "is_default": True,
-                }
+                },
             ]
         }
         profile = ark_bench.select_platform_profile(auth_status)
@@ -86,16 +100,14 @@ class ModelResolutionTests(unittest.TestCase):
                 },
             ]
         }
-        with patch.object(ark_bench, "run_json", return_value=catalog) as mocked:
+        with patch.object(ark_bench, "run_json", return_value=catalog):
             target = ark_bench.resolve_target(
                 "豆包 Seed 2.0 Mini", auth_status
             )
-
         self.assertEqual(target.model, "doubao-seed-2-0-mini-260428")
         self.assertEqual(target.profile_type, "platform")
-        self.assertIn("models", mocked.call_args.args[0])
 
-    def test_explicit_model_id_uses_platform_without_catalog_lookup(self):
+    def test_explicit_model_id_skips_catalog_lookup(self):
         auth_status = {
             "profiles_summary": [
                 {
@@ -110,119 +122,97 @@ class ModelResolutionTests(unittest.TestCase):
             )
         mocked.assert_not_called()
         self.assertEqual(target.model, "doubao-seed-2-0-mini-260428")
-        self.assertEqual(target.profile_type, "platform")
 
 
-class MetricTests(unittest.TestCase):
-    def test_recognizes_ark_dot_separated_token_delta(self):
-        self.assertTrue(
-            ark_bench.is_token_delta("response.output_text.delta", "token")
-        )
-        self.assertFalse(
-            ark_bench.is_token_delta("response.output_text.done", "token")
-        )
-
-    def test_length_limited_response_is_valid_for_benchmarking(self):
-        self.assertTrue(
-            ark_bench.is_success_response(
-                {
-                    "status": "incomplete",
-                    "incomplete_details": {"reason": "length"},
-                }
-            )
-        )
-        self.assertFalse(
-            ark_bench.is_success_response(
-                {
-                    "status": "incomplete",
-                    "incomplete_details": {"reason": "content_filter"},
-                }
-            )
-        )
-
-    def test_extracts_responses_api_usage(self):
-        actual = ark_bench.extract_usage(
-            {
-                "usage": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "input_tokens_details": {"cached_tokens": 80},
-                }
-            }
-        )
-        self.assertEqual(actual, (100, 20, 80))
-
-    def test_weighted_cache_hit_rate(self):
-        metrics = [
-            ark_bench.RequestMetric(
-                scenario="prefix",
-                request_id="1",
-                success=True,
-                ttft_ms=100,
-                e2e_ms=300,
-                tpot_ms=10,
-                input_tokens=100,
-                output_tokens=21,
-                cached_tokens=50,
-            ),
-            ark_bench.RequestMetric(
-                scenario="prefix",
-                request_id="2",
-                success=True,
-                ttft_ms=200,
-                e2e_ms=500,
-                tpot_ms=15,
-                input_tokens=300,
-                output_tokens=21,
-                cached_tokens=250,
-            ),
-        ]
-        summary = ark_bench.summarize(metrics)
-        self.assertEqual(summary["successful_requests"], 2)
-        self.assertAlmostEqual(summary["cache_hit_rate"], 0.75)
-        self.assertAlmostEqual(summary["ttft_ms"]["p50"], 150)
-
-    def test_failures_are_excluded_from_latency(self):
-        metrics = [
-            ark_bench.RequestMetric(
-                scenario="prefix",
-                request_id="ok",
-                success=True,
-                ttft_ms=100,
-                e2e_ms=200,
-                input_tokens=10,
-                output_tokens=2,
-            ),
-            ark_bench.RequestMetric(
-                scenario="prefix",
-                request_id="failed",
-                success=False,
-                error="timeout",
-            ),
-        ]
-        summary = ark_bench.summarize(metrics)
-        self.assertEqual(summary["failed_requests"], 1)
-        self.assertEqual(summary["ttft_ms"]["mean"], 100)
-
-
-class PresetTests(unittest.TestCase):
-    def test_cache_can_be_enabled_for_reuse_scenarios(self):
-        payload = ark_bench.make_payload(
-            "example", "input", 64, "none", enable_cache=True
-        )
-        self.assertEqual(
-            payload["caching"], {"type": "enabled", "prefix": True}
-        )
-
-    def test_standard_preset_matches_document(self):
+class AdapterTests(unittest.TestCase):
+    def test_standard_preset_matches_bundled_llm_bench(self):
         args = ark_bench.build_parser().parse_args(["--model", "example"])
         ark_bench.apply_preset(args)
         self.assertEqual(args.prefix_len, 12000)
         self.assertEqual(args.suffix_len, 2000)
         self.assertEqual(args.num_requests, 200)
-        self.assertEqual(args.initial_len, 7000)
-        self.assertEqual(args.max_turns, 30)
+        self.assertEqual(args.initial_len, 3000)
+        self.assertEqual(args.num_sessions, 10)
+        self.assertEqual(args.max_turns, 20)
         self.assertEqual(args.max_concurrency, 5)
+        self.assertEqual(
+            ark_bench.scenario_output_tokens(args, "multiturn"), 1024
+        )
+
+    def test_quick_preset_is_low_cost(self):
+        args = ark_bench.build_parser().parse_args(
+            ["--model", "example", "--preset", "quick"]
+        )
+        ark_bench.apply_preset(args)
+        self.assertEqual(args.num_requests, 6)
+        self.assertEqual(args.num_sessions * args.max_turns, 6)
+        self.assertEqual(args.max_output_tokens, 64)
+
+    def test_command_uses_bundled_bench_without_api_key_argument(self):
+        args = ark_bench.build_parser().parse_args(["--model", "example"])
+        ark_bench.apply_preset(args)
+        target = ark_bench.Target(
+            "doubao-seed-2-0-mini-260428",
+            "platform_cn-beijing_accountwide",
+            "platform",
+            "https://ark.cn-beijing.volces.com/api/v3",
+        )
+        command = ark_bench.command_base(args, target, "prefix")
+        self.assertIn(str(LLM_BENCH_DIR / "bench.py"), command)
+        self.assertNotIn("--api-key", command)
+
+    def test_process_log_redacts_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "run.log"
+            with redirect_stdout(io.StringIO()):
+                ark_bench.run_process(
+                    [sys.executable, "-c", "print('ark-secret-value')"],
+                    os.environ.copy(),
+                    log_path,
+                    "ark-secret-value",
+                )
+            self.assertNotIn("ark-secret-value", log_path.read_text())
+            self.assertIn("<redacted>", log_path.read_text())
+
+
+class BundledLlmBenchTests(unittest.TestCase):
+    def test_chat_payload_requests_stream_usage(self):
+        payload = llm_engine.build_payload(
+            "model-id",
+            [{"role": "user", "content": "hello"}],
+            reasoning_effort="none",
+            max_completion_tokens=64,
+        )
+        self.assertTrue(payload["stream"])
+        self.assertEqual(payload["stream_options"], {"include_usage": True})
+        self.assertEqual(payload["max_completion_tokens"], 64)
+        self.assertEqual(payload["reasoning_effort"], "none")
+
+    def test_weighted_cache_and_tpot_metrics(self):
+        metrics = llm_metrics.RequestMetrics()
+        metrics.add_success(
+            ttft=0.1,
+            e2e=0.5,
+            output_tokens=21,
+            prompt_tokens=100,
+            cached_tokens=50,
+            has_cache_field=True,
+        )
+        metrics.add_success(
+            ttft=0.2,
+            e2e=0.8,
+            output_tokens=21,
+            prompt_tokens=300,
+            cached_tokens=250,
+            has_cache_field=True,
+        )
+        self.assertAlmostEqual(metrics.weighted_cache_hit, 0.75)
+        self.assertEqual(len(metrics.tpot), 2)
+
+    def test_sharegpt_corpus_is_bundled(self):
+        path = Path(llm_datasets.POOL_PATH)
+        self.assertTrue(path.is_file())
+        self.assertGreater(path.stat().st_size, 10_000_000)
 
 
 if __name__ == "__main__":

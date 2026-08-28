@@ -1,0 +1,12 @@
+# 密钥与本地配置，勿提交/外传
+.env
+peers/*.env
+!peers/_template.env
+
+# 运行产物
+reports/
+__pycache__/
+
+# 本地环境
+.venv/
+.DS_Store

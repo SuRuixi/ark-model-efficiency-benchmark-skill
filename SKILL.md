@@ -7,7 +7,8 @@ description: "Benchmarks Ark LLM latency, throughput, and cache performance with
 
 Run a standardized performance evaluation through Ark's postpaid API and preset
 inference endpoints. The runner uses a `platform` Ark CLI profile, obtains its
-credential automatically, and never asks the user to paste an API key.
+credential automatically, and delegates measurement to the bundled `llm_bench`
+engine. It never asks the user to paste an API key.
 
 ## Trigger
 
@@ -84,10 +85,19 @@ arkcli profile apikey get --profile "<profile-name>" --plain
 Capture the second command directly in process memory. Do not print its stdout.
 Use it only as the `Authorization` header for benchmark requests.
 
-5. Call `<base_url>/responses` with the resolved Model ID. Ark automatically
-   routes a Model ID to its preset inference endpoint and charges by consumed
-   tokens through the postpaid platform account. Do not call `arkcli +deploy`,
-   do not create a custom Endpoint, and do not use an Agent Plan credential.
+5. Export the resolved values only to the child-process environment:
+
+```bash
+ARK_BASE_URL="<base-url>"
+ARK_API_KEY="<in-memory-key>"
+```
+
+6. Invoke `llm_bench/bench.py`, which calls
+   `<base_url>/chat/completions` with streaming enabled and
+   `stream_options.include_usage=true`. Ark automatically routes a Model ID to
+   its preset inference endpoint and charges by consumed tokens through the
+   postpaid platform account. Do not call `arkcli +deploy`, do not create a
+   custom Endpoint, and do not use an Agent Plan credential.
 
 ## Model Resolution
 
@@ -131,13 +141,16 @@ Supported overrides include `--prefix-len`, `--suffix-len`, `--num-prefixes`,
 | Scenario | Parameters |
 |---|---|
 | Prefix reuse | 12,000 prefix tokens, 2,000 suffix tokens, 10 prefixes, 200 requests, concurrency 5 |
-| Multi-turn | 7,000 initial tokens, 256-token follow-ups, 5 sessions, 30 turns, concurrency 5 |
-| Generation | Up to 512 output tokens per request; reasoning disabled by default |
+| Multi-turn | 3,000 initial tokens, 256-token follow-ups, 10 sessions, 20 turns, concurrency 5 |
+| Generation | Prefix up to 512 output tokens; multi-turn up to 1,024; reasoning disabled |
 
 These settings can incur substantial model usage. The user explicitly requesting
 a performance test is sufficient authorization to run it. State the selected
 Model ID, postpaid platform Profile, scenario, and request count before starting;
 do not ask for an additional confirmation.
+
+The complete `standard` run sends 401 requests: one connectivity request, 200
+prefix requests, and 200 multi-turn generations.
 
 ## Results
 
@@ -150,6 +163,13 @@ The runner prints a final JSON object containing report paths. Read the generate
 - observed input/output tokens;
 - anomalies or failed-request patterns;
 - the absolute report directory.
+
+Reports are produced by the bundled `llm_bench` implementation:
+
+- `report_prefix.md` / `report_multiturn.md`;
+- `result_prefix.json` / `result_multiturn.json`;
+- latency and cache PNG charts;
+- `run.log` with the redacted console transcript.
 
 Do not claim model quality, correctness, or cost efficiency from these latency
 measurements. Note that cross-model comparisons are valid only under the same
@@ -192,5 +212,5 @@ Compute metrics as follows:
 Record the exact model or endpoint, profile, API base URL, reasoning effort,
 maximum output tokens, requested and observed token lengths, concurrency,
 request count, random seed, test time, and duration. Preserve request-level
-metrics and failures in CSV and JSON, then provide a Markdown summary and
-scenario chart.
+metrics and failures in JSON, then provide a Markdown summary and scenario
+charts.

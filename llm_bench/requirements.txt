@@ -1,0 +1,6 @@
+# 运行依赖（Python 3.9+）
+aiohttp>=3.9
+numpy>=1.24
+matplotlib>=3.7
+# 可选：精确 token 切片（缺省按 ~4 chars/token 估算）
+tiktoken>=0.5

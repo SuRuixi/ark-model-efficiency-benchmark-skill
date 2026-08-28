@@ -1,6 +1,6 @@
 # Ark Model Efficiency Benchmark Skill
 
-基于 Ark CLI 凭据体系的一键大语言模型性能评测 Skill。用户只需用自然语言指定 Ark 模型或 Endpoint，即可通过后付费 API 的预置推理接入点执行标准化压测，并获得 Markdown、JSON、CSV 与 PNG 报告，全程无需手写 API Key。
+基于 Ark CLI 凭据体系与内置 `llm-bench` 的一键大语言模型性能评测 Skill。用户只需用自然语言指定 Ark 模型或 Endpoint，即可通过后付费 API 的预置推理接入点执行标准化压测，并获得 Markdown、JSON 与 PNG 报告，全程无需手写 API Key。
 
 [English](#english)
 
@@ -14,7 +14,8 @@
 - 通过 Ark CLI 的机器接口读取平台凭据，密钥仅用于请求头，不写入报告或日志。
 - 执行连通性、Prefix 前缀复用、多轮长上下文三类测试。
 - 统计 TTFT、TPOT、E2E、缓存命中率，以及 Mean、P50、P99。
-- 输出请求级 CSV、结构化 JSON、Markdown 摘要和 PNG 趋势图。
+- 使用随 Skill 分发的 ShareGPT 本地语料，无需联网下载数据集。
+- 输出请求级 JSON、Markdown 摘要、运行日志和 PNG 趋势图。
 
 ### 前置条件
 
@@ -97,17 +98,17 @@ bash scripts/run.sh \
 
 显式指定的 Profile 必须为 `type=platform`。自然语言模型名会通过 Ark 模型目录解析为 Model ID，并由平台自动路由至预置推理接入点。
 
-首次运行会在 Skill 目录创建隔离的 `.venv`，并自动安装 `aiohttp`、`tiktoken` 与 `matplotlib`。
+首次运行会在 Skill 目录创建隔离的 `.venv`，并自动安装 `aiohttp`、`numpy`、`tiktoken` 与 `matplotlib`。
 
 ### 评测口径
 
 | 场景 | `standard` 参数 |
 |---|---|
 | Prefix 前缀复用 | 12,000 前缀 Token + 2,000 后缀 Token，10 个前缀，200 个请求，并发 5 |
-| 多轮长上下文 | 7,000 初始 Token + 每轮 256 Token，5 个会话，30 轮，并发 5 |
-| 输出设置 | 每请求最多 512 Token，默认关闭推理 |
+| 多轮长上下文 | 3,000 初始 Token + 每轮 256 Token，10 个会话，20 轮，并发 5 |
+| 输出设置 | Prefix 最多 512 Token，多轮最多 1,024 Token，默认关闭推理 |
 
-`standard` 完整流程包含 1 个连通性请求、200 个 Prefix 请求和 150 个多轮请求，共 351 个请求，可能产生较高 Token 用量。`quick` 用于功能验证与低成本预检。
+`standard` 完整流程包含 1 个连通性请求、200 个 Prefix 请求和 200 个多轮生成，共 401 个请求，可能产生较高 Token 用量。`quick` 用于功能验证与低成本预检。
 
 指标定义：
 
@@ -150,24 +151,23 @@ bash scripts/run.sh --help
 reports/
 ├── connectivity_<timestamp>/
 │   ├── report.md
-│   ├── result.json
-│   └── requests.csv
+│   └── connectivity.log
 ├── prefix_<timestamp>/
-│   ├── report.md
-│   ├── result.json
-│   ├── requests.csv
-│   └── report_prefix.png
+│   ├── report_prefix.md
+│   ├── result_prefix.json
+│   ├── report_prefix_reuse.png
+│   └── run.log
 └── multiturn_<timestamp>/
-    ├── report.md
-    ├── result.json
-    ├── requests.csv
-    └── report_multiturn.png
+    ├── report_multiturn.md
+    ├── result_multiturn.json
+    ├── report_multiturn_turns.png
+    └── run.log
 ```
 
 ### 安全机制
 
 - 凭据通过 `arkcli profile apikey get --plain` 在运行时读取。
-- API Key 不通过命令参数传入，不写入报告、CSV 或 JSON。
+- API Key 不通过命令参数传入，不写入报告、日志或 JSON。
 - HTTP 错误写入报告前会执行密钥脱敏。
 - 请勿在调试时启用包含环境变量的 Shell 跟踪。
 
@@ -183,7 +183,7 @@ reports/
 
 ### Overview
 
-Ark Model Efficiency Benchmark is a one-command LLM performance evaluation Skill built on Ark CLI authentication. It invokes Ark preset inference endpoints through the postpaid platform API. A user can specify an Ark model or endpoint in natural language and receive Markdown, JSON, CSV, and PNG reports without manually entering an API key.
+Ark Model Efficiency Benchmark is a one-command LLM performance evaluation Skill built on Ark CLI authentication and the bundled `llm-bench` engine. It invokes Ark preset inference endpoints through the postpaid platform API. A user can specify an Ark model or endpoint in natural language and receive Markdown, JSON, and PNG reports without manually entering an API key.
 
 ### Features
 
@@ -193,7 +193,8 @@ Ark Model Efficiency Benchmark is a one-command LLM performance evaluation Skill
 - Retrieves the platform credential through Ark CLI without persisting it.
 - Runs connectivity, prefix-reuse, and multi-turn long-context workloads.
 - Measures TTFT, TPOT, E2E latency, cache hit rate, Mean, P50, and P99.
-- Produces request-level CSV, structured JSON, Markdown summaries, and PNG charts.
+- Uses a bundled local ShareGPT corpus without downloading a dataset.
+- Produces request-level JSON, Markdown summaries, redacted logs, and PNG charts.
 
 ### Requirements
 
@@ -255,17 +256,17 @@ bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario prefix --preset st
 bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario multiturn --preset standard
 ```
 
-The first run creates an isolated `.venv` and installs `aiohttp`, `tiktoken`, and `matplotlib`.
+The first run creates an isolated `.venv` and installs `aiohttp`, `numpy`, `tiktoken`, and `matplotlib`.
 
 ### Standard Workload
 
 | Scenario | `standard` parameters |
 |---|---|
 | Prefix reuse | 12,000 prefix tokens + 2,000 suffix tokens, 10 prefixes, 200 requests, concurrency 5 |
-| Multi-turn context | 7,000 initial tokens + 256 tokens per follow-up, 5 sessions, 30 turns, concurrency 5 |
-| Generation | Up to 512 output tokens per request; reasoning disabled by default |
+| Multi-turn context | 3,000 initial tokens + 256 tokens per follow-up, 10 sessions, 20 turns, concurrency 5 |
+| Generation | Up to 512 prefix output tokens and 1,024 multi-turn output tokens; reasoning disabled |
 
-The complete `standard` run sends 351 requests and may consume a substantial number of tokens. Use `quick` for functional validation.
+The complete `standard` run sends 401 requests and may consume a substantial number of tokens. Use `quick` for functional validation.
 
 ### Metrics
 
