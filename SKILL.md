@@ -71,12 +71,30 @@ npm install -g @volcengine/ark-cli@latest
 
 If the wrapper reports that authentication is required, run:
 
+1. Give the user this internal Ark account URL and ask them to sign in:
+
+```text
+https://babi.bytedance.net/finance/basic/volcManage/?fullscreen=true&volc_account_category=1&tab=my&status=1
+```
+
+2. After the user confirms that the internal account login is complete, initiate
+   Ark CLI SSO authentication:
+
 ```bash
 arkcli auth login volc-sso
 ```
 
-Wait for browser authentication to finish, then rerun the original wrapper
-command. Never request an API key from the user.
+3. Wait for browser authentication to finish and verify:
+
+```bash
+arkcli auth status --format json
+```
+
+4. When `logged_in=true`, rerun the original wrapper command with the previously
+   selected model and mode. Do not ask the user to select them again.
+
+Never request an API key from the user. Do not start the benchmark before both
+the internal account login and Ark CLI SSO authentication are complete.
 
 ## Ark CLI Call Sequence
 

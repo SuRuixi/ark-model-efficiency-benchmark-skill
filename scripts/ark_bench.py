@@ -19,6 +19,10 @@ from typing import Any
 SKILL_DIR = Path(__file__).resolve().parents[1]
 BENCH_SCRIPT = SKILL_DIR / "llm_bench" / "bench.py"
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+INTERNAL_ARK_LOGIN_URL = (
+    "https://babi.bytedance.net/finance/basic/volcManage/"
+    "?fullscreen=true&volc_account_category=1&tab=my&status=1"
+)
 
 
 class BenchmarkError(RuntimeError):
@@ -48,7 +52,9 @@ def check_auth() -> dict[str, Any]:
     status = run_json(["arkcli", "auth", "status", "--format", "json"])
     if not status.get("logged_in"):
         raise BenchmarkError(
-            "Ark CLI is not authenticated. Run `arkcli auth login volc-sso` first."
+            "Ark CLI is installed but has no active SSO login. "
+            f"First sign in to the internal Ark account at {INTERNAL_ARK_LOGIN_URL}, "
+            "then run `arkcli auth login volc-sso` and retry the benchmark."
         )
     return status
 

@@ -35,6 +35,13 @@ arkcli auth status
 
 登录完成后，Ark CLI 会管理 Profile 与 API Key。评测过程不要求用户复制密钥。
 
+内部用户已经安装 Ark CLI、但尚未完成 SSO 登录时：
+
+1. 打开[内部方舟账号页面](https://babi.bytedance.net/finance/basic/volcManage/?fullscreen=true&volc_account_category=1&tab=my&status=1)，登录内部账号。
+2. 执行 `arkcli auth login volc-sso`，完成浏览器 SSO 授权。
+3. 执行 `arkcli auth status --format json`，确认 `logged_in=true`。
+4. 重新运行原评测命令，无需填写 API Key。
+
 ### 安装 Skill
 
 在目标项目根目录执行：
@@ -229,6 +236,13 @@ npm install -g @volcengine/ark-cli@latest
 arkcli auth login volc-sso
 arkcli auth status
 ```
+
+For internal users who installed Ark CLI but have not completed SSO:
+
+1. Sign in through the [internal Ark account page](https://babi.bytedance.net/finance/basic/volcManage/?fullscreen=true&volc_account_category=1&tab=my&status=1).
+2. Run `arkcli auth login volc-sso` and complete browser authorization.
+3. Verify `logged_in=true` with `arkcli auth status --format json`.
+4. Rerun the original benchmark command without entering an API key.
 
 ### Install the Skill
 

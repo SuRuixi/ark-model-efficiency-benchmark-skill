@@ -126,6 +126,16 @@ class ModelResolutionTests(unittest.TestCase):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_missing_sso_error_includes_internal_login_flow(self):
+        with patch.object(
+            ark_bench, "run_json", return_value={"logged_in": False}
+        ):
+            with self.assertRaises(ark_bench.BenchmarkError) as caught:
+                ark_bench.check_auth()
+        message = str(caught.exception)
+        self.assertIn("babi.bytedance.net/finance/basic/volcManage/", message)
+        self.assertIn("arkcli auth login volc-sso", message)
+
     def test_api_key_plain_output(self):
         result = SimpleNamespace(returncode=0, stdout="test-key\n", stderr="")
         with patch.object(ark_bench.subprocess, "run", return_value=result) as mocked:
