@@ -65,18 +65,36 @@ git clone https://github.com/SuRuixi/ark-model-efficiency-benchmark-skill.git \
 
 Skill 会自动解析模型、选择后付费 `platform` Profile、运行评测并汇总报告。模型名称存在歧义时，会返回候选列表供用户选择。Agent Plan 与 Coding Plan 不参与评测调用。
 
+### 选择测试模式
+
+当用户只提出「测试模型性能」而未指定场景时，Skill 会先询问：
+
+```text
+请选择测试模式：连通性检查（1 个请求）、Prefix 前缀复用（200 个请求）、
+多轮长上下文（200 个请求），或完整测试（401 个请求）？
+```
+
+| 模式 | 适用目标 |
+|---|---|
+| `connectivity` | 验证模型、鉴权和基础流式指标 |
+| `prefix` | 测试固定前缀复用和缓存命中 |
+| `multiturn` | 测试对话历史增长后的延迟与缓存 |
+| `all` | 顺序执行以上三种模式 |
+
+用户已经明确说明模式时，Skill 会直接执行。多模型对比是 `prefix` 或 `multiturn` 的附加能力，不属于独立模式。
+
 ### 命令行使用
 
 完整标准评测：
 
 ```bash
-bash scripts/run.sh --model "doubao-seed-2-0-mini" --preset standard
+bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario all --preset standard
 ```
 
 低成本快速验证：
 
 ```bash
-bash scripts/run.sh --model "doubao-seed-2-0-mini" --preset quick
+bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario all --preset quick
 ```
 
 仅运行指定场景：
@@ -234,18 +252,33 @@ Benchmark the performance of Doubao Seed 2.0 Mini on Ark.
 
 The Skill resolves the model to a postpaid Model ID, selects a `platform` profile, runs the benchmark, and summarizes the generated reports. Ambiguous model names produce a ranked candidate list.
 
+### Select a Benchmark Mode
+
+For a generic performance-test request, the Skill asks the user to select one
+mode before execution:
+
+| Mode | Purpose |
+|---|---|
+| `connectivity` | Validate model access and basic streaming metrics with one request |
+| `prefix` | Measure fixed-prefix reuse and cache behavior |
+| `multiturn` | Measure growing conversation context |
+| `all` | Run all three modes sequentially |
+
+An explicitly stated mode runs immediately. Multi-model comparison is an option
+within `prefix` or `multiturn`, not a separate mode.
+
 ### CLI Usage
 
 Run the complete standard benchmark:
 
 ```bash
-bash scripts/run.sh --model "doubao-seed-2-0-mini" --preset standard
+bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario all --preset standard
 ```
 
 Run a low-cost validation:
 
 ```bash
-bash scripts/run.sh --model "doubao-seed-2-0-mini" --preset quick
+bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario all --preset quick
 ```
 
 Run one workload:

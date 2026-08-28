@@ -19,12 +19,43 @@ Invoke for requests such as:
 - 「测一下某个 Ark Endpoint 的 TTFT、TPOT」
 - 「比较 Ark 上两个模型的延迟」
 
+## Mode Selection
+
+Before running a benchmark, determine whether the user explicitly selected a
+mode. Supported choices are:
+
+| Mode | Purpose | Standard request count |
+|---|---|---:|
+| `connectivity` | Send one request to validate model access and inspect basic TTFT, E2E, usage, cache fields, and reasoning state | 1 |
+| `prefix` | Measure fixed-prefix reuse, TTFT, TPOT, E2E, and cache hit behavior across independent requests | 200 |
+| `multiturn` | Measure latency and cache behavior as conversation history grows across turns | 200 |
+| `all` | Run connectivity, prefix, and multi-turn sequentially | 401 |
+
+If the user has not explicitly selected a mode, ask this question before any
+Ark CLI or benchmark command:
+
+```text
+请选择测试模式：连通性检查（1 个请求）、Prefix 前缀复用（200 个请求）、
+多轮长上下文（200 个请求），或完整测试（401 个请求）？
+```
+
+Do not infer `all` from a generic request such as 「测试模型性能」. If the user
+already names a mode, execute it directly without asking again. Treat
+「前缀缓存」 as `prefix`, 「长上下文」 or 「多轮」 as `multiturn`,
+「连通性」 as `connectivity`, and 「完整」「全部」 as `all`.
+
+Multi-model comparison is an option within `prefix` or `multiturn`; it is not a
+separate benchmark mode.
+
 ## Fast Invocation
 
-When this Skill is triggered, run the benchmark wrapper immediately:
+After the mode is selected, run the benchmark wrapper immediately:
 
 ```bash
-bash <skill-dir>/scripts/run.sh --model "<user model wording>" --preset standard
+bash <skill-dir>/scripts/run.sh \
+  --model "<user model wording>" \
+  --scenario "<selected-mode>" \
+  --preset standard
 ```
 
 Do not perform separate model searches, profile listing, API-key lookup, or
@@ -120,7 +151,8 @@ candidates. Ask the user to choose one candidate, then rerun with that exact ID.
 
 Defaults:
 
-- `--scenario all`: connectivity, prefix reuse, and multi-turn context.
+- The Skill must always pass the user-selected `--scenario`; the CLI fallback is
+  `all` for direct terminal use.
 - `--preset standard`: document-aligned parameters.
 - `--output-dir ./reports`: reports are written under the current workspace.
 
