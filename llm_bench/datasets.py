@@ -41,10 +41,11 @@ def ensure_corpus(pool_chars: int = DEFAULT_POOL_CHARS) -> str:
 
 
 class TokenSlicer:
-    """token 精确切片。优先级：tiktoken（轻量、离线）> transformers > 字符估算。
+    """按构造 tokenizer 切片。
 
-    切片方式：整段文本 encode 一次得到 token id 序列，按 id 切片再 decode，
-    保证每段 token 长度严格相等（可用 token_lens 校验）。
+    显式指定 tokenizer 时使用 transformers 且加载失败即报错；否则使用本地
+    tiktoken o200k_base，缺失时才退化为字符估算。这里的 token 长度只对构造
+    tokenizer 精确，服务端实际长度仍以 usage.prompt_tokens 为准。
     """
 
     def __init__(self, tokenizer_name: Optional[str] = None,
@@ -52,26 +53,30 @@ class TokenSlicer:
                  encoding_name: str = "o200k_base") -> None:
         self.chars_per_token = chars_per_token
         self.backend = "approx"
+        self.tokenizer_label = f"approx:{chars_per_token:g}-chars-per-token"
         self._enc = None
         self._tok = None
+        if tokenizer_name:
+            try:
+                from transformers import AutoTokenizer  # type: ignore
+                self._tok = AutoTokenizer.from_pretrained(tokenizer_name)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(
+                    f"[dataset] 无法加载指定 tokenizer {tokenizer_name!r}: {e}"
+                ) from e
+            self.backend = "transformers"
+            self.tokenizer_label = f"transformers:{tokenizer_name}"
+            print(f"[dataset] using tokenizer: {tokenizer_name}", flush=True)
+            return
         try:
             import tiktoken  # type: ignore
             self._enc = tiktoken.get_encoding(encoding_name)
             self.backend = "tiktoken"
+            self.tokenizer_label = f"tiktoken:{encoding_name}"
             print(f"[dataset] using tiktoken encoding: {encoding_name}", flush=True)
         except Exception as e:  # noqa: BLE001
-            if tokenizer_name:
-                try:
-                    from transformers import AutoTokenizer  # type: ignore
-                    self._tok = AutoTokenizer.from_pretrained(tokenizer_name)
-                    self.backend = "transformers"
-                    print(f"[dataset] using tokenizer: {tokenizer_name}", flush=True)
-                except Exception as e2:  # noqa: BLE001
-                    print(f"[dataset] tiktoken ({e}) 与 tokenizer ({e2}) 均不可用，"
-                          f"按 ~{chars_per_token} chars/token 估算", file=sys.stderr, flush=True)
-            else:
-                print(f"[dataset] tiktoken 不可用 ({e})，"
-                      f"按 ~{chars_per_token} chars/token 估算", file=sys.stderr, flush=True)
+            print(f"[dataset] tiktoken 不可用 ({e})，"
+                  f"按 ~{chars_per_token} chars/token 估算", file=sys.stderr, flush=True)
         if self.backend == "approx":
             print(f"[dataset] 注意：长度为估算值 (~{chars_per_token} chars/token)", flush=True)
 
@@ -234,7 +239,8 @@ def build_session_questions(pool: str, slicer: TokenSlicer, max_turns: int,
     total_tokens = sum(lens)
     if not slicer.approx:
         ids = slicer.encode(pool)
-        start = (session_chars_offset // int(slicer.chars_per_token)) % max(1, len(ids) // 2)
+        chars_per_token = max(1, int(slicer.chars_per_token))
+        start = (session_chars_offset // chars_per_token) % max(1, len(ids) // 2)
         # 平铺份数必须覆盖 start 偏移后的整段窗口，否则小语料池上末尾轮次切出空串
         reps = -(-(start + total_tokens) // len(ids)) if ids else 1
         zone = (ids * reps)[start:start + total_tokens]

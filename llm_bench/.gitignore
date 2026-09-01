@@ -1,11 +1,21 @@
 # 密钥与本地配置，勿提交/外传
 .env
-peers/*.env
-!peers/_template.env
+targets/*.env
+!targets/_template.env
+!targets/ark.env
+!targets/aliyun.env
+!targets/bigmodel.env
+!targets/deepseek.env
+!targets/kimi.env
+!targets/tencent.env
 
 # 运行产物
 reports/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
 
 # 本地环境
 .venv/

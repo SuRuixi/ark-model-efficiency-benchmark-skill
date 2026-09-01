@@ -145,8 +145,8 @@ benchmark requests.
 5. Export the resolved values only to the child-process environment:
 
 ```bash
-ARK_BASE_URL="<base-url>"
-ARK_API_KEY="<in-memory-key>"
+LLM_BENCH_BASE_URL="<base-url>"
+LLM_BENCH_API_KEY="<in-memory-key>"
 ```
 
 6. Invoke `llm_bench/bench.py`, which calls
@@ -155,6 +155,16 @@ ARK_API_KEY="<in-memory-key>"
    its preset inference endpoint and charges by consumed tokens through the
    postpaid platform account. Do not call `arkcli +deploy`, do not create a
    custom Endpoint, and do not use an Agent Plan credential.
+
+The wrapper maps user-facing modes to the bundled engine:
+
+- `prefix` -> `prefix-repetition`;
+- `multiturn` -> `multi-turn`;
+- `connectivity` -> `connectivity`.
+
+The engine defaults to `thinking.type=disabled` and omits
+`reasoning_effort`. Use `--thinking enabled` and an explicit
+`--reasoning-effort` only for models that require thinking.
 
 ## Model Resolution
 
@@ -191,8 +201,8 @@ bash <skill-dir>/scripts/run.sh --model "<model>" --scenario multiturn --preset 
 Supported overrides include `--prefix-len`, `--suffix-len`, `--num-prefixes`,
 `--num-requests`, `--initial-len`, `--question-len`, `--num-sessions`,
 `--max-turns`, `--max-concurrency`, `--max-output-tokens`,
-`--reasoning-effort`, and `--profile`. An explicitly supplied Profile must have
-`type=platform`.
+`--reasoning-effort`, `--thinking`, `--seed`, and `--profile`. An explicitly
+supplied Profile must have `type=platform`.
 
 ## Standard Parameters
 
@@ -224,8 +234,8 @@ The runner prints a final JSON object containing report paths. Read the generate
 
 Reports are produced by the bundled `llm_bench` implementation:
 
-- `report_prefix.md` / `report_multiturn.md`;
-- `result_prefix.json` / `result_multiturn.json`;
+- `report_prefix-repetition.md` / `report_multi-turn.md`;
+- `result_prefix-repetition.json` / `result_multi-turn.json`;
 - latency and cache PNG charts;
 - `run.log` with the redacted console transcript.
 

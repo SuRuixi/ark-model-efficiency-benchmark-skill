@@ -10769,14 +10769,14 @@ As a demand generation manager for a B2B brand ambassador program called Brandch
 Here is my Python code:
 api\_url = 'https://api.yelp.com/v3/businesses/search'
 params = {'term':'tacos','location':'90045'}
-api\_key = 'Ee7vYfTT9GpATMDYqODar7mbdyz\_8EJ668FCbiqCv81Y3j98WaCsiAleAyI\_LFn5p\_JVHehSQnxffx-tDdQLekCpMhFJPxz8SVMp34Beawxkint62oDnJ\_I0PiXMY3Yx'
+api\_key = 'YOUR_YELP_API_KEY'
 headers = {'Authorization':'Bearer %s' % api\_key}
 api\_request = requests.get(api.\_url, params=params, headers=headers)
 
 Why am I receiving the error below and how do I fix it?
 NameError Traceback (most recent call last)
  in 
- 3 api\_key = 'Ee7vYfTT9GpATMDYqODar7mbdyz\_8EJ668FCbiqCv81Y3j98WaCsiAleAyI\_LFn5p\_JVHehSQnxffx-tDdQLekCpMhFJPxz8SVMp34Beawxkint62oDnJ\_I0PiXMY3Yx'
+ 3 api\_key = 'YOUR_YELP_API_KEY'
  4 headers = {'Authorization':'Bearer %s' % api\_key}
 ----> 5 api\_request = requests.get(api.\_url, params=params, headers=headers)
 

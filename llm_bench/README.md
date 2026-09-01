@@ -1,155 +1,181 @@
 # llm-bench
 
-轻量级 LLM Benchmark Serve 工具：零 vLLM 依赖（仅 `aiohttp` + `numpy` + `matplotlib`），针对火山方舟 Ark 压测 **TTFT / TPOT / E2E / Cache 命中率**。
+通过 OpenAI 兼容的 Chat Completions 接口测试一个或多个 LLM 服务的 **TTFT、TPOT、E2E 和 Cache 命中率**。
 
 > 在 `ark-model-benchmark` Skill 中，请优先运行
-> `bash ../scripts/run.sh --model "<模型名称>"`。该包装器会从 Ark CLI 自动注入
-> 后付费 Profile、Base URL 和 API Key，无需手工设置下文的 `ARK_*` 环境变量。
+> `bash ../scripts/run.sh --model "<模型名称>" --scenario "<模式>"`。该包装器会从
+> Ark CLI 自动注入后付费 Profile、Base URL 和 API Key，无需修改 `targets/ark.env`。
 
 ## 安装
 
 ```bash
+cd llm-bench
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 快速开始
+## 使用方式
+
+只需要修改和选择两样东西：
+
+- **目标**：`targets/` 中的一份服务配置，例如 `ark.env`、`mytarget.env`。
+- **场景**：固定前缀池使用 `run_prefix_repetition.sh`，多轮会话测缓存命中使用
+  `run_multi_turn.sh`。
+
+### 1. 配置目标
+
+每个服务商对应一个 `targets/*.env`。新增目标时先复制模板：
 
 ```bash
-source .venv/bin/activate   # 若尚未激活虚拟环境
+cp targets/_template.env targets/mytarget.env
+```
 
-export ARK_BASE_URL="https://ark.cn-beijing.volces.com/api/v3"
+运行前打开目标文件，按文件内注释填写 API Key、模型 ID 和 Base URL。例如
+`targets/ark.env`：
+
+```bash
 export ARK_API_KEY="..."
-# 也兼容 OpenAI 命名：OPENAI_BASE_URL / OPENAI_API_KEY（未设置 ARK_* 时自动回退读取）
-
-# 连通性自检（1 个请求，打印 TTFT / usage / cached_tokens）
-python bench.py connectivity --model deepseek-v4-flash-ga-260731
+export TARGET_MODEL="your-model-id"
 ```
 
-自检通过后，可以直接用 run 脚本跑方舟服务配置下的两种压测模式：
+每个目标的模型独立配置，不要在终端全局设置 `TARGET_MODEL`。API Key 可按目标文件内的注释从终端继承。
+
+### 2. 检查连通性
+
+每个参与压测的目标都先检查一次：
 
 ```bash
-./run_prefix.sh     # 模式 A：多用户共享同一批固定前缀
-./run_multiturn.sh  # 模式 B：会话内逐轮累加历史
+./run_connectivity.sh ark
+./run_connectivity.sh mytarget
 ```
 
-两种模式的详细语义见「模式说明」，可调参数见「压测参数」。
+确认模型 ID、Token 统计和思考状态符合预期后再开始压测。
 
-## 标准用法
+### 3. 运行压测
 
-按你的目标选一条路径即可，三条路径共用同一套工具和报告：
-
-| 我想…… | 做法 |
-|---|---|
-| 只压方舟 | `./run_prefix.sh` / `./run_multiturn.sh` |
-| 方舟 vs 第三方对比 | `PEER=<名字> ./run_prefix.sh`（详见下文「双侧压测」） |
-| 只压第三方服务 | 覆盖主目标坐标后照常跑（详见下文「单独压第三方」） |
-
-### 单侧压测（只压方舟）
+一个目标表示单压，多个目标表示同步对比：
 
 ```bash
-./run_prefix.sh
-./run_multiturn.sh
+# 单目标
+./run_prefix_repetition.sh ark
+./run_multi_turn.sh ark
 
-# 覆盖参数：环境变量前置即可（完整参数见「压测参数」）
-MAX_CONCURRENCY=20 PREFIX_LEN=12000 SUFFIX_LEN=2000 NUM_REQUESTS=200 \
-./run_prefix.sh
+# 两个目标对比
+./run_prefix_repetition.sh ark mytarget
+./run_multi_turn.sh ark mytarget
 
-# multiturn：想让命中率曲线更平滑可提到 50 个 session（见「样本量与统计口径」）
-MAX_CONCURRENCY=10 NUM_SESSIONS=50 MAX_TURNS=20 \
-./run_multiturn.sh
+# 多目标对比
+./run_prefix_repetition.sh ark mytarget another-target
 ```
 
-### 双侧压测（方舟 vs 第三方，双边同发）
+命令格式为“脚本 + 一个或多个目标 + 可选参数”。多个目标表示同步对比，目标顺序只决定报告中的展示顺序；所有目标使用各自的配置和同一份输入，并分别统计耗时。
 
-`prefix` / `multiturn` 均支持同步压测多个模型：同一份样本数据、同一时间窗内并发发起，指标口径完全一致，报告自动出对比表。
+## 目标配置
+
+项目已在 `targets/` 中预置若干常见服务配置，均不包含凭据，可用目标
+以目录内容为准。目标名就是 `targets/<目标名>.env` 的文件名，也可复制 `_template.env` 新增目标。
+
+更换模型时，直接修改对应文件中的 `TARGET_MODEL`。也可以在项目根目录使用命令修改对应配置文件并确认：
 
 ```bash
-# 1. 准备对比目标配置：cp peers/_template.env peers/<名字>.env，按注释填空
-#    （自带 aliyun.env / deepseek.env 两个样例，填上自己的 key 即可用）
-ls peers/
-
-# 2. PEER=<名字> 选定对比目标后启动
-PEER=aliyun ./run_prefix.sh
-PEER=aliyun ./run_multiturn.sh
-
-# 覆盖参数写法相同
-MAX_CONCURRENCY=20 PREFIX_LEN=12000 SUFFIX_LEN=2000 NUM_REQUESTS=200 \
-PEER=aliyun ./run_prefix.sh
+perl -pi -e 's/^export TARGET_MODEL=.*/export TARGET_MODEL="your-model-id"/' targets/mytarget.env
+grep '^export TARGET_MODEL=' targets/mytarget.env
+./run_connectivity.sh mytarget
 ```
 
-### 单独压测第三方服务
+命令中的模型 ID 和配置文件路径应按目标替换。
 
-工具走 OpenAI 兼容 **Chat Completions** 协议（流式，`POST /chat/completions`），任何兼容该协议的服务都能压。做法很简单：**主目标坐标（`ARK_BASE_URL` / `ARK_API_KEY` / `MODEL`）指向第三方**，其余流程不变。
+不同厂商可能用不同 ID 表示同一模型版本。跨厂比较前应确认版本映射，并保持思考设置和输出上限一致。
+
+默认发送 `thinking.type=disabled`。若连通性检查发现模型不允许关闭思考，会根据服务端错误提示在对应 target 中设置 `TARGET_THINKING="enabled"`；模型要求推理档位时再设置 `TARGET_REASONING_EFFORT`。
+
+## 压测模式
+
+### Prefix Repetition
+
+N 个不同前缀组成固定前缀池。每个前缀由多个请求重复使用，每个请求使用不同后缀。该场景对齐 vLLM 的 `prefix_repetition` workload。
 
 ```bash
-# 1. 先连通性自检（1 个请求，验证地址 / 密钥 / 模型 ID 可用）
-python bench.py connectivity --model <第三方模型ID> \
-  --base-url <第三方API地址> --api-key <第三方KEY>
-
-# 2. 通过后正式压测
-python bench.py prefix --model <第三方模型ID> \
-  --base-url <第三方API地址> --api-key <第三方KEY>
-
-# 3. 用 run 脚本同理：export 三个主目标变量后照常 ./run_prefix.sh
+./run_prefix_repetition.sh ark mytarget \
+  --prefix-len 12000 \
+  --suffix-len 2000 \
+  --num-prefixes 10 \
+  --num-requests 400 \
+  --max-concurrency 5
 ```
 
-> 提示：第三方不认方舟的 `reasoning_effort=none` 时（自检会告警「思考未关闭」），可用 `--reasoning-effort ""` 置空、`--enable-thinking false` / `--thinking disabled` 等参数适配厂商差异，详见 `--help`。
+每个前缀的第一次请求是冷启动。高并发下，前几个请求可能在 cache 写入完成前到达，因此命中率可能低于稳态值。
 
+### Multi-turn
 
-## 压测参数
+每个 session 是一条串行对话链，session 之间并发。Turn 1 发送长输入，Turn 2+ 增加短追问，历史回答会进入后续上下文。
 
-跑 run 脚本时用环境变量覆盖默认值（直接调 bench.py 则用对应 `--` 长参数，见 `--help`）：
+```bash
+./run_multi_turn.sh ark mytarget \
+  --initial-len 3000 \
+  --question-len 256 \
+  --num-sessions 20 \
+  --max-turns 20 \
+  --max-concurrency 10
+```
 
-| 环境变量 | 模式 | 对应参数 | 默认值 | 含义 |
-|---|---|---|---|---|
-| `MODEL` | 通用 | `--model` | `deepseek-v4-flash-ga-260731` | 方舟侧（主）模型 ID |
-| `PREFIX_LEN` | prefix | `--prefix-len` | 12000 | 共享前缀长度（token，主变量） |
-| `SUFFIX_LEN` | prefix | `--suffix-len` | 2000 | 每请求独立后缀长度（token） |
-| `NUM_PREFIXES` | prefix | `--num-prefixes` | 10 | 前缀池个数（决定命中率上限） |
-| `NUM_REQUESTS` | prefix | `--num-requests` | 200 | 总请求数（建议为 `NUM_PREFIXES` 整数倍） |
-| `INITIAL_LEN` | multiturn | `--initial-len` | 3000 | Turn1 长输入 token 数 |
-| `QUESTION_LEN` | multiturn | `--question-len` | 256 | Turn2+ 每轮短追问 token 数 |
-| `NUM_SESSIONS` | multiturn | `--num-sessions` | 10 | 总会话数（样本量） |
-| `MAX_TURNS` | multiturn | `--max-turns` | 20 | 每会话轮数 |
-| `MAX_CONCURRENCY` | 通用 | `--max-concurrency` | 5 | 并发上限（prefix 单位是请求；multiturn 单位是 session） |
-| `OUTPUT` | 通用 | `--output` | `reports/<mode>_<时间戳>/result_<mode>.json` | 结果 JSON 路径 |
-| `PEER` / `COMPARE[_1..3]` | 通用 | `--compare` | 不设即单边 | 第三方对比目标（见「双侧压测」） |
+查看全部参数：
 
-## 模式说明
+```bash
+./run_prefix_repetition.sh --help
+./run_multi_turn.sh --help
+```
 
-**multiturn**：session = 一条完整对话链，会话内多轮严格串行（并发单位是 session）。Turn1 塞入 `--initial-len` 长输入模拟文档/长上下文，Turn2+ 每轮只有 `--question-len` 的短追问，上下文由模型回答逐轮累积；Turn_i 的前缀 = Turn_{i−1} 的全部内容，命中率随轮次爬升，Turn1 冷启动未命中属预期。
+常用参数：
 
-**prefix**：不同请求复用同一批固定前缀（模拟多用户共享系统提示词），后缀各不相同。每前缀首次请求冷启动未命中属预期；全并发下前几个复用序号可能因 cache 未及时写入而低于稳态值，看命中率稳态请关注复用序号较大的曲线段。`--num-requests` 建议取 `--num-prefixes` 的整数倍。
+- **Prefix Repetition**：`--prefix-len` 为每个固定前缀的 token 数，
+  `--suffix-len` 为每个请求独立后缀的 token 数，`--num-prefixes` 为前缀池大小，
+  `--num-requests` 为请求总数。
+- **Multi-turn**：`--initial-len` 为首轮长输入的 token 数，`--question-len` 为
+  后续每轮新增问题的 token 数，`--num-sessions` 为会话总数，`--max-turns` 为
+  每个会话的最大轮数。
+- **通用**：`--max-concurrency` 是每个目标独立的并发上限，在 Prefix
+  Repetition 中表示并发请求数，在 Multi-turn 中表示并发 session 数；多个目标
+  同时压测时，整体最大在途请求数约为目标数乘以该值；`--seed` 用于重放同一批输入；
+  `--output` 指定逐请求 JSON；`--max-completion-tokens` 统一覆盖所有目标的
+  单次输出上限。仅需修改某个目标时，在对应配置文件中设置
+  `TARGET_MAX_COMPLETION_TOKENS`。
 
-## 输出与报告
+## 报告
 
-每次压测产出独立目录 `reports/<mode>_<时间戳>/`，多次运行互不混杂：`report_<mode>.md`（Markdown 报告 + PNG 曲线）+ `result_<mode>.json`（逐请求原始数据）；控制台同步打印总览。实测样例（prefix 双侧对比报告开头的对比表）：
+每次运行生成独立目录，目录名包含模式、服务商、模型和时间：
 
-> 建议以 avg / median 为主要对比口径；P99 的解读需满足样本量条件，见「样本量与统计口径」。
+```text
+reports/<mode>_<服务商>-<模型>[_vs_...]_<时间戳>/
+report_<mode>.md   Markdown 报告
+report_<mode>*.png 图表
+result_<mode>.json 逐请求原始数据
+```
 
-| 模型 | 成功/失败 | TTFT avg (ms) | TTFT P99 (ms) | TPOT avg (ms) | E2E avg (ms) | 加权Cache命中率 |
-|---|---|---|---|---|---|---|
-| deepseek-v4-flash-ga-260731 | 200/0 | 2442.7 | 3663.8 | 9.5 | 5626.1 | 85.29% |
-| DeepSeek官方 | 199/1 | 730.8 | 1616.0 | 10.5 | 4308.2 | 84.78% |
+逐请求结果会保存服务商响应中的 `request_id`，并在可用时保存响应头中的
+`provider_log_id`，便于定位单次请求；服务商未返回时对应字段为空。
 
-## 样本量与统计口径
+配置中的长度是本地语料净长度；实际输入 token 数来自服务端
+`usage.prompt_tokens`，包含模板、当前输入和对话历史。
 
-统计样本是「一次生成」事件：**prefix 的样本数 = 总请求数，multiturn 的样本数 = 会话数 × 轮数**。默认参数下两者均为 200 个样本，专为**均值口径**设计：
+Cache 命中率只统计成功且返回 cache 字段的请求：
 
-- **avg / median**：200 个样本已足够稳定，默认规模直接可信，这是推荐客户关注的口径。
-- **P95**：约 300~500 个样本起比较稳。
-- **P99**：需要 1000+ 个样本；200 个样本下 P99 之后只剩约 2 个数据点，波动大，仅供参考。若确需解读 P99，把样本量提到 1000 以上（prefix：`NUM_REQUESTS=1000 NUM_PREFIXES=20`；multiturn：`NUM_SESSIONS=50`）。
+```text
+命中率 = Σ cached_tokens / Σ prompt_tokens
+```
 
-另外，同参数多跑几次看跨 run 一致性，比单次加大样本量更能反映真实波动（每次 run 的 seed 已写入报告，可复现）。无论样本量多大，对比不同批次的结果时务必保持 `MAX_CONCURRENCY` 一致。
+multi-turn 每轮的平均输入 tokens 只统计成功到达该轮的 session。session 在某轮
+失败后立即退出，后续轮次不补零；图底部会显示每轮成功样本数并标出终止轮次。
 
-multiturn 的命中率曲线按轮序分层（每个轮序点由所有 session 平均而来），session 越少曲线越毛糙；想让曲线更平滑可提到 50 个 session，均值指标本身不受影响。
+P99 建议至少采集 1000 个成功样本。跨批次比较时应保持模型版本、思考设置、
+输出上限、并发和 seed 一致。
 
-## 说明
+## 运行规则
 
-- 语料来自本地 `data/sharegpt_pool.txt`（约 12MB / 263 万 tokens，随工具自带，完全离线、不联网下载）；压测规模超出池容量时自动循环拼接补足并告警。
-- 默认关闭思维链，保证 TTFT/TPOT 口径干净
-- 不做任何 warmup，保持冷启动 + 全并发真实形态；失败请求不重试、剔除时延统计、计入失败数（对齐 vLLM：429 也计为失败；例外：multiturn 会话内 429 指数退避重试最多 3 次）。
-- 语料采样 seed 每轮随机生成并写入报告，可复现输入。
-- 输出封顶（`--max-completion-tokens`）prefix 默认 512 / multiturn 默认 1024：multiturn 的回答会累积进上下文、驱动轮次增长，上限需要更宽松；prefix 各请求独立、输出即弃，512 足够且省配额。
+- 语料来自本地 `data/sharegpt_pool.txt`，不需要在线下载。
+- 默认发送 `thinking.type=disabled` 关闭思考，不做 warmup；
+  `reasoning_effort` 仅在对应 target 明确配置时发送。
+- 失败请求不进入时延统计。
+- multi-turn 对 429 和连接错误最多重试 3 次，其他失败会终止当前 session。
+- 连续出现配置性 4xx 时会 fail-fast，避免整轮请求持续失败。

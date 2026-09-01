@@ -19,6 +19,11 @@ from typing import Any
 SKILL_DIR = Path(__file__).resolve().parents[1]
 BENCH_SCRIPT = SKILL_DIR / "llm_bench" / "bench.py"
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+ENGINE_SCENARIOS = {
+    "connectivity": "connectivity",
+    "prefix": "prefix-repetition",
+    "multiturn": "multi-turn",
+}
 INTERNAL_ARK_LOGIN_URL = (
     "https://babi.bytedance.net/finance/basic/volcManage/"
     "?fullscreen=true&volc_account_category=1&tab=my&status=1"
@@ -366,19 +371,24 @@ def run_process(
 
 
 def command_base(args: argparse.Namespace, target: Target, scenario: str) -> list[str]:
-    return [
+    command = [
         sys.executable,
         str(BENCH_SCRIPT),
-        scenario,
+        ENGINE_SCENARIOS[scenario],
         "--model",
         target.model,
-        "--reasoning-effort",
-        args.reasoning_effort,
+        "--thinking",
+        args.thinking,
         "--timeout",
         str(args.timeout),
         "--max-completion-tokens",
         str(scenario_output_tokens(args, scenario)),
     ]
+    if args.reasoning_effort != "none":
+        command.extend(["--reasoning-effort", args.reasoning_effort])
+    if args.seed is not None and scenario != "connectivity":
+        command.extend(["--seed", str(args.seed)])
+    return command
 
 
 def execute(args: argparse.Namespace) -> dict[str, Any]:
@@ -416,8 +426,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     env = os.environ.copy()
-    env["ARK_BASE_URL"] = target.base_url
-    env["ARK_API_KEY"] = api_key
+    env["LLM_BENCH_BASE_URL"] = target.base_url
+    env["LLM_BENCH_API_KEY"] = api_key
     warning_filter = "ignore:::urllib3"
     env["PYTHONWARNINGS"] = ",".join(
         item for item in (env.get("PYTHONWARNINGS"), warning_filter) if item
@@ -445,7 +455,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 encoding="utf-8",
             )
         elif scenario == "prefix":
-            report_path = run_dir / "report_prefix.md"
+            report_path = run_dir / "report_prefix-repetition.md"
             command.extend(
                 [
                     "--prefix-len",
@@ -461,12 +471,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                     "--report",
                     str(report_path),
                     "--output",
-                    str(run_dir / "result_prefix.json"),
+                    str(run_dir / "result_prefix-repetition.json"),
                 ]
             )
             run_process(command, env, run_dir / "run.log", api_key)
         else:
-            report_path = run_dir / "report_multiturn.md"
+            report_path = run_dir / "report_multi-turn.md"
             command.extend(
                 [
                     "--initial-len",
@@ -482,7 +492,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                     "--report",
                     str(report_path),
                     "--output",
-                    str(run_dir / "result_multiturn.json"),
+                    str(run_dir / "result_multi-turn.json"),
                 ]
             )
             run_process(command, env, run_dir / "run.log", api_key)
@@ -533,9 +543,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-output-tokens", type=int)
     parser.add_argument(
         "--reasoning-effort",
-        choices=["none", "minimal", "low", "medium", "high"],
+        choices=["none", "minimal", "low", "medium", "high", "max"],
         default="none",
     )
+    parser.add_argument(
+        "--thinking",
+        choices=["disabled", "enabled"],
+        default="disabled",
+    )
+    parser.add_argument("--seed", type=int)
     parser.add_argument("--timeout", type=float, default=600)
     return parser
 

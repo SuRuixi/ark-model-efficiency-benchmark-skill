@@ -198,7 +198,11 @@ class AdapterTests(unittest.TestCase):
         )
         command = ark_bench.command_base(args, target, "prefix")
         self.assertIn(str(LLM_BENCH_DIR / "bench.py"), command)
+        self.assertIn("prefix-repetition", command)
+        self.assertNotIn("prefix", command)
         self.assertNotIn("--api-key", command)
+        self.assertNotIn("--reasoning-effort", command)
+        self.assertEqual(command[command.index("--thinking") + 1], "disabled")
 
     def test_process_log_redacts_secret(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -219,13 +223,14 @@ class BundledLlmBenchTests(unittest.TestCase):
         payload = llm_engine.build_payload(
             "model-id",
             [{"role": "user", "content": "hello"}],
-            reasoning_effort="none",
+            reasoning_effort="",
             max_completion_tokens=64,
         )
         self.assertTrue(payload["stream"])
         self.assertEqual(payload["stream_options"], {"include_usage": True})
         self.assertEqual(payload["max_completion_tokens"], 64)
-        self.assertEqual(payload["reasoning_effort"], "none")
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
 
     def test_weighted_cache_and_tpot_metrics(self):
         metrics = llm_metrics.RequestMetrics()

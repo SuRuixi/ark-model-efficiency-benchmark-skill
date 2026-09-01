@@ -158,6 +158,8 @@ bash scripts/run.sh \
 --max-concurrency
 --max-output-tokens
 --reasoning-effort
+--thinking
+--seed
 --profile
 --output-dir
 ```
@@ -178,16 +180,20 @@ reports/
 │   ├── report.md
 │   └── connectivity.log
 ├── prefix_<timestamp>/
-│   ├── report_prefix.md
-│   ├── result_prefix.json
-│   ├── report_prefix_reuse.png
+│   ├── report_prefix-repetition.md
+│   ├── result_prefix-repetition.json
+│   ├── report_prefix-repetition_reuse.png
 │   └── run.log
 └── multiturn_<timestamp>/
-    ├── report_multiturn.md
-    ├── result_multiturn.json
-    ├── report_multiturn_turns.png
+    ├── report_multi-turn.md
+    ├── result_multi-turn.json
+    ├── report_multi-turn_turns.png
     └── run.log
 ```
+
+Skill 对外继续使用 `prefix` 与 `multiturn`，执行器会分别映射到新版
+`llm-bench` 的 `prefix-repetition` 与 `multi-turn` 子命令。凭据仅通过
+`LLM_BENCH_BASE_URL` 与 `LLM_BENCH_API_KEY` 注入子进程。
 
 ### 安全机制
 
@@ -304,6 +310,10 @@ bash scripts/run.sh --model "doubao-seed-2-0-mini" --scenario multiturn --preset
 ```
 
 The first run creates an isolated `.venv` and installs `aiohttp`, `numpy`, `tiktoken`, and `matplotlib`.
+
+The wrapper maps `prefix` to the bundled `prefix-repetition` subcommand and
+`multiturn` to `multi-turn`. Ark credentials are passed only through
+`LLM_BENCH_BASE_URL` and `LLM_BENCH_API_KEY`.
 
 ### Standard Workload
 
